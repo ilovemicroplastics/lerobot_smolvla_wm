@@ -137,6 +137,49 @@ class SmolVLMWithExpertModel(nn.Module):
         # Remove unused embed_tokens
         self.lm_expert.embed_tokens = None
 
+        ############################
+        ####### NEW ADDITION #######
+
+        # copy the main VLM config
+        lm_expert_2_config = copy.deepcopy(config.text_config)
+        hidden_size = lm_expert_2_config.hidden_size
+        # resize the copy to the size set by expert_width_multiplier , by default this is half the size of the main VLM
+        lm_expert_2_config.hidden_size = int(hidden_size * expert_width_multiplier)  # hidden_size // 2
+        lm_expert_2_config.intermediate_size = get_intermediate_size(int(hidden_size * expert_width_multiplier))
+        lm_expert_2_config.num_hidden_layers = self.num_vlm_layers
+        # handicap expert layer count if chosen to od so
+        if num_expert_layers > 0:
+            assert len(self.get_vlm_model().text_model.layers) % num_expert_layers == 0, (
+                f"Number of layers in the VLM {len(self.get_vlm_model().text_model.layers)} are not multiple of num_expert_layers {num_expert_layers}"
+            )
+            lm_expert_2_config.num_hidden_layers = num_expert_layers
+
+        self.lm_expert_2 = AutoModel.from_config(lm_expert_2_config)   # this is in contrat to AutoModel.from_pretrained which would also load the weights
+        
+        self.num_expert_layers = len(self.lm_expert_2.layers)
+        self.self_attn_every_n_layers = self_attn_every_n_layers
+        
+        # change the settings of attention heads to cross if selected to do so in config, while keeping self attention every self_attn_every_n_layers layers
+        if "cross" in attention_mode:
+            # Reshape qkv projections to have the same input dimension as the vlm
+            for layer_idx in range(len(self.lm_expert_2.layers)):
+                if self.self_attn_every_n_layers > 0 and layer_idx % self.self_attn_every_n_layers == 0:
+                    continue
+                self.lm_expert_2.layers[layer_idx].self_attn.k_proj = nn.Linear(
+                    config.text_2_config.num_key_value_heads * config.text_config.head_dim,
+                    lm_expert_2_config.num_key_value_heads * lm_expert_2_config.head_dim,
+                    bias=lm_expert_2_config.attention_bias,
+                )
+                self.lm_expert_2.layers[layer_idx].self_attn.v_proj = nn.Linear(
+                    config.text_config.num_key_value_heads * config.text_config.head_dim,
+                    lm_expert_2_config.num_key_value_heads * lm_expert_2_config.head_dim,
+                    bias=lm_expert_2_config.attention_bias,
+                )
+        # Remove unused embed_tokens
+        self.lm_expert_2.embed_tokens = None
+
+        ############################
+        
         self.num_attention_heads = self.config.text_config.num_attention_heads
         self.num_key_value_heads = self.config.text_config.num_key_value_heads
 
