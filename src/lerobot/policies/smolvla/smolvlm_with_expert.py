@@ -166,7 +166,7 @@ class SmolVLMWithExpertModel(nn.Module):
                 if self.self_attn_every_n_layers > 0 and layer_idx % self.self_attn_every_n_layers == 0:
                     continue
                 self.lm_expert_2.layers[layer_idx].self_attn.k_proj = nn.Linear(
-                    config.text_2_config.num_key_value_heads * config.text_config.head_dim,
+                    config.text_config.num_key_value_heads * config.text_config.head_dim,
                     lm_expert_2_config.num_key_value_heads * lm_expert_2_config.head_dim,
                     bias=lm_expert_2_config.attention_bias,
                 )
